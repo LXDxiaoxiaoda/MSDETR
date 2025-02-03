@@ -96,7 +96,7 @@ class Trainer(object):
             self.dataset.set_images(images)
 
         if self.mode == 'train':
-            self.checkpoint_mode = 'multi'
+            self.checkpoint_mode = 'multi'     # default multi
             self.loader = create('{}Reader'.format(capital_mode))(
                 self.dataset, cfg.worker_num)
 
@@ -452,6 +452,8 @@ class Trainer(object):
                 'find_unused_parameters'] if 'find_unused_parameters' in self.cfg else False
             model = paddle.DataParallel(
                 model, find_unused_parameters=find_unused_parameters)
+
+        # paddle.summary(model, (3, 256, 256))
 
         self.status.update({
             'epoch_id': self.start_epoch,

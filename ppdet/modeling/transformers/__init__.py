@@ -28,6 +28,7 @@ from .position_encoding import *
 from .deformable_transformer import *
 from .damsdetr_transformer import *
 from .hybrid_encoder import *
+from .rtdetr_transformer import *
 
 
 

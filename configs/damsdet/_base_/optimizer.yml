@@ -1,4 +1,4 @@
-epoch: 50
+epoch: 50  # 训练轮次
 
 LearningRate:
   base_lr: 0.0001

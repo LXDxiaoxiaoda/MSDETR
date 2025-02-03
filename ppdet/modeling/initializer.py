@@ -323,3 +323,10 @@ def reset_initialized_parameter(model, include_self=True):
             _no_grad_fill_(m.weight, 1.)
             if hasattr(m, 'bias') and getattr(m, 'bias') is not None:
                 _no_grad_fill_(m.bias, 0)
+
+
+def linear_init_(module):
+    bound = 1 / math.sqrt(module.weight.shape[0])
+    uniform_(module.weight, -bound, bound)
+    if hasattr(module, "bias") and module.bias is not None:
+        uniform_(module.bias, -bound, bound)

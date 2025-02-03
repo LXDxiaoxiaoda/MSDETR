@@ -2,11 +2,11 @@ use_gpu: true
 use_xpu: false
 use_mlu: false
 use_npu: false
-log_iter: 20
+log_iter: 20        
 save_dir: output/FLIR
-snapshot_epoch: 1
-print_flops: false
-print_params: false
+snapshot_epoch: 5   # default: 1  多少轮验证一次
+print_flops: True
+print_params: True
 
 # Exporting the model
 export:

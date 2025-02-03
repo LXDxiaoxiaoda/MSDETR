@@ -1,0 +1,8 @@
+output/
+output_inference/
+bbox_pr_curve/
+dataset/
+vdl_log_dir/
+coco_pretrain_weights.pdparams
+flir_best_model.pdparams
+bbox.json

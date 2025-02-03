@@ -3,7 +3,7 @@ TrainReader:
   sample_transforms:
     - Multi_Decode: {}
     - Multi_RandomDistort: {prob: 0.8}
-    - Multi_RandomExpand_IRVIS: {fill_value: [123.675, 116.28, 103.53], fill_value_ir: [114.495, 114.495, 114.495]}
+    - Multi_RandomExpand_IRVIS: {fill_value: [123.675, 116.28, 103.53], fill_value_ir: [114.495, 114.495, 114.495]} # 随机扩展算法，将图片放置在fill_value值的背景图片上；114.495 代表灰色
     - Multi_RandomCrop: {prob: 0.8}
     - Multi_RandomFlip: {}
   batch_transforms:
@@ -12,7 +12,7 @@ TrainReader:
     - Multi_NormalizeBox: {}
     - BboxXYXY2XYWH: {}
     - Multi_Permute: {}
-  batch_size: 4
+  batch_size: 2   # default 4
   shuffle: true
   drop_last: true
   collate_batch: false

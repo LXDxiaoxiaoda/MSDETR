@@ -32,7 +32,7 @@ from ppdet.core.workspace import load_config, merge_config
 from ppdet.utils.check import check_gpu, check_version, check_config
 from ppdet.utils.cli import ArgsParser
 from ppdet.engine import Trainer
-from ppdet.engine.trainer_ssod import Trainer_ARSL
+# from ppdet.engine.trainer_ssod import Trainer_ARSL    # 屏蔽掉，因为不需要导出ssod 的模型 Semi-Supervised Object Detection, SSOD
 from ppdet.slim import build_slim_model
 
 from ppdet.utils.logger import setup_logger

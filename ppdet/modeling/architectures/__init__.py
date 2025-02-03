@@ -27,3 +27,7 @@ from .detr import *
 #
 from .damsdet import *
 
+from .fusionDETR import *
+
+from .MSDETR import *
+

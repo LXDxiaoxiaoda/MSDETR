@@ -66,6 +66,25 @@ class CSPRepLayer(nn.Layer):
         x_2 = self.conv2(x)
         return self.conv3(x_1 + x_2)
 
+class FusionVisIR(nn.Layer):  # PaddlePaddle 中使用 nn.Layer 而不是 nn.Module
+    def __init__(self, channel, reduction=4):
+        super(FusionVisIR, self).__init__()
+        self.avg_pool = nn.AdaptiveAvgPool2D(1)  # PaddlePaddle 中使用 AdaptiveAvgPool2D
+        self.fc = nn.Sequential(
+            nn.Linear(channel, channel // reduction),
+            nn.ReLU(),
+            nn.Linear(channel // reduction, channel),
+            nn.Sigmoid()
+        )
+        self.Conv1x1 = nn.Conv2D(2 * channel, channel, kernel_size=1)  # PaddlePaddle 中使用 Conv2D
+
+    def forward(self, vis, ir):
+        b, c, _, _ = vis.shape
+        fea = vis + ir
+        _vis = self.fc(self.avg_pool(vis).reshape([b, c])).reshape([b, c, 1, 1])  # 使用 reshape 而不是 view
+        _ir = self.fc(self.avg_pool(ir).reshape([b, c])).reshape([b, c, 1, 1])
+        fea = fea * (self.Conv1x1(paddle.concat([_vis, _ir], axis=1)))  # PaddlePaddle 中使用 paddle.concat
+        return fea
 
 @register
 class TransformerLayer(nn.Layer):
@@ -239,25 +258,222 @@ class HybridEncoder(nn.Layer):
             axis=1)[None, :, :]
 
     def forward(self, feats, for_mot=False):
-        assert len(feats) == len(self.in_channels)
+        # forward函数中的注释以RT-DETR结构为例，其余结构和注释不一定相同
+        assert len(feats) == len(self.in_channels)  # in_channels [512, 1024, 2048]
         # get projection features
-        proj_feats = [self.input_proj[i](feat) for i, feat in enumerate(feats)]
+        proj_feats = [self.input_proj[i](feat) for i, feat in enumerate(feats)] # 统一channel 256   proj_feats = [256, 256, 256] 三个特征层
+
+        # AIFI s5进行编码
         # encoder
-        if self.num_encoder_layers > 0:
-            for i, enc_ind in enumerate(self.use_encoder_idx):
-                h, w = proj_feats[enc_ind].shape[2:]
+        if self.num_encoder_layers > 0: # num_encoder_layers = 1
+            for i, enc_ind in enumerate(self.use_encoder_idx):  # use_encoder_idx = [2] s5特征
+                h, w = proj_feats[enc_ind].shape[2:]    # h w 23 23
                 # flatten [B, C, H, W] to [B, HxW, C]
                 src_flatten = proj_feats[enc_ind].flatten(2).transpose(
-                    [0, 2, 1])
+                    [0, 2, 1])  # 2 256 23 23 -> 2 256 529 -> 2 529 256
                 if self.training or self.eval_size is None:
                     pos_embed = self.build_2d_sincos_position_embedding(
                         w, h, self.hidden_dim, self.pe_temperature)
                 else:
                     pos_embed = getattr(self, f'pos_embed{enc_ind}', None)
-                memory = self.encoder[i](src_flatten, pos_embed=pos_embed)
+                memory = self.encoder[i](src_flatten, pos_embed=pos_embed)  # 2 529 256
                 proj_feats[enc_ind] = memory.transpose([0, 2, 1]).reshape(
-                    [-1, self.hidden_dim, h, w])
+                    [-1, self.hidden_dim, h, w])    # 2 529 256 -> 2 256 529 -> 2 256 23 23 f5
 
+        # CCFM s3 s4 f5(s5经过AIFI) 进行FPN + PAN
+        # top-down fpn
+        inner_outs = [proj_feats[-1]]
+        for idx in range(len(self.in_channels) - 1, 0, -1):
+            feat_heigh = inner_outs[0]
+            feat_low = proj_feats[idx - 1]
+            feat_heigh = self.lateral_convs[len(self.in_channels) - 1 - idx](
+                feat_heigh)
+            inner_outs[0] = feat_heigh
+
+            upsample_feat = F.interpolate(
+                feat_heigh, scale_factor=2., mode="nearest")
+            inner_out = self.fpn_blocks[len(self.in_channels) - 1 - idx](
+                paddle.concat(
+                    [upsample_feat, feat_low], axis=1))
+            inner_outs.insert(0, inner_out)
+
+        # bottom-up pan
+        outs = [inner_outs[0]]
+        for idx in range(len(self.in_channels) - 1):
+            feat_low = outs[-1]
+            feat_height = inner_outs[idx + 1]
+            downsample_feat = self.downsample_convs[idx](feat_low)
+            out = self.pan_blocks[idx](paddle.concat(
+                [downsample_feat, feat_height], axis=1))
+            outs.append(out)
+
+        return outs
+
+    @classmethod
+    def from_config(cls, cfg, input_shape):
+        return {
+            'in_channels': [i.channels for i in input_shape],
+            'feat_strides': [i.stride for i in input_shape]
+        }
+
+    @property
+    def out_shape(self):
+        return [
+            ShapeSpec(
+                channels=self.hidden_dim, stride=self.feat_strides[idx])
+            for idx in range(len(self.in_channels))
+        ]
+    
+@register
+@serializable
+class MS_HybridEncoder(nn.Layer):
+    __shared__ = ['depth_mult', 'act', 'trt', 'eval_size']
+    __inject__ = ['encoder_layer']
+
+    def __init__(self,
+                 in_channels=[512, 1024, 2048],
+                 feat_strides=[8, 16, 32],
+                 hidden_dim=256,
+                 use_encoder_idx=[2],
+                 num_encoder_layers=1,
+                 encoder_layer='TransformerLayer',
+                 pe_temperature=10000,
+                 expansion=1.0,
+                 depth_mult=1.0,
+                 act='silu',
+                 trt=False,
+                 eval_size=None):
+        super(MS_HybridEncoder, self).__init__()
+        self.in_channels = in_channels
+        self.feat_strides = feat_strides
+        self.hidden_dim = hidden_dim
+        self.use_encoder_idx = use_encoder_idx
+        self.num_encoder_layers = num_encoder_layers
+        self.pe_temperature = pe_temperature
+        self.eval_size = eval_size
+
+        # channel projection
+        self.input_proj = nn.LayerList()
+        for in_channel in in_channels:
+            self.input_proj.append(
+                nn.Sequential(
+                    nn.Conv2D(
+                        in_channel, hidden_dim, kernel_size=1, bias_attr=False),
+                    nn.BatchNorm2D(
+                        hidden_dim,
+                        weight_attr=ParamAttr(regularizer=L2Decay(0.0)),
+                        bias_attr=ParamAttr(regularizer=L2Decay(0.0)))))
+        # encoder transformer
+        self.encoder = nn.LayerList([
+            TransformerEncoder(encoder_layer, num_encoder_layers)
+            for _ in range(len(use_encoder_idx))
+        ])
+
+        act = get_act_fn(
+            act, trt=trt) if act is None or isinstance(act,
+                                                       (str, dict)) else act
+        # top-down fpn
+        self.lateral_convs = nn.LayerList()
+        self.fpn_blocks = nn.LayerList()
+        for idx in range(len(in_channels) - 1, 0, -1):
+            self.lateral_convs.append(
+                BaseConv(
+                    hidden_dim, hidden_dim, 1, 1, act=act))
+            self.fpn_blocks.append(
+                CSPRepLayer(
+                    hidden_dim * 2,
+                    hidden_dim,
+                    round(3 * depth_mult),
+                    act=act,
+                    expansion=expansion))
+
+        # bottom-up pan
+        self.downsample_convs = nn.LayerList()
+        self.pan_blocks = nn.LayerList()
+        for idx in range(len(in_channels) - 1):
+            self.downsample_convs.append(
+                BaseConv(
+                    hidden_dim, hidden_dim, 3, stride=2, act=act))
+            self.pan_blocks.append(
+                CSPRepLayer(
+                    hidden_dim * 2,
+                    hidden_dim,
+                    round(3 * depth_mult),
+                    act=act,
+                    expansion=expansion))
+            
+        # Fusion module
+        self.fusion_block = FusionVisIR(256)    # 放self.input_proj后面，此输出channel为256
+
+        self._reset_parameters()
+
+    def _reset_parameters(self):
+        if self.eval_size:
+            for idx in self.use_encoder_idx:
+                stride = self.feat_strides[idx]
+                pos_embed = self.build_2d_sincos_position_embedding(
+                    self.eval_size[1] // stride, self.eval_size[0] // stride,
+                    self.hidden_dim, self.pe_temperature)
+                setattr(self, f'pos_embed{idx}', pos_embed)
+
+    @staticmethod
+    def build_2d_sincos_position_embedding(w,
+                                           h,
+                                           embed_dim=256,
+                                           temperature=10000.):
+        grid_w = paddle.arange(int(w), dtype=paddle.float32)
+        grid_h = paddle.arange(int(h), dtype=paddle.float32)
+        grid_w, grid_h = paddle.meshgrid(grid_w, grid_h)
+        assert embed_dim % 4 == 0, \
+            'Embed dimension must be divisible by 4 for 2D sin-cos position embedding'
+        pos_dim = embed_dim // 4
+        omega = paddle.arange(pos_dim, dtype=paddle.float32) / pos_dim
+        omega = 1. / (temperature**omega)
+
+        out_w = grid_w.flatten()[..., None] @omega[None]
+        out_h = grid_h.flatten()[..., None] @omega[None]
+
+        return paddle.concat(
+            [
+                paddle.sin(out_w), paddle.cos(out_w), paddle.sin(out_h),
+                paddle.cos(out_h)
+            ],
+            axis=1)[None, :, :]
+
+    def forward(self, feats_vis, feats_ir, for_mot=False):
+        # forward函数中的注释以RT-DETR结构为例
+        assert len(feats_vis) == len(self.in_channels)  # in_channels [512, 1024, 2048]
+        # get projection features
+        proj_feats_vis = [self.input_proj[i](feat) for i, feat in enumerate(feats_vis)] # 统一channel 256   proj_feats = [256, 256, 256] 三个特征层
+        proj_feats_ir = [self.input_proj[i](feat) for i, feat in enumerate(feats_ir)] # 统一channel 256   proj_feats = [256, 256, 256] 三个特征层
+        
+        proj_feats = []
+        # 这里可以对特征融合
+        for i in range(len(proj_feats_vis)):
+            # proj_feats.append(self.fusion_block(proj_feats_vis[i], proj_feats_ir[i]))
+            proj_feats.append(proj_feats_vis[i] + proj_feats_ir[i])     # 默认是简单相加
+
+
+        # AIFI s5进行编码
+        # encoder
+        if self.num_encoder_layers > 0: # num_encoder_layers = 1
+            for i, enc_ind in enumerate(self.use_encoder_idx):  # use_encoder_idx = [2] s5特征
+                h, w = proj_feats[enc_ind].shape[2:]    # h w 23 23
+                # flatten [B, C, H, W] to [B, HxW, C]
+                src_flatten = proj_feats[enc_ind].flatten(2).transpose(
+                    [0, 2, 1])  # 2 256 23 23 -> 2 256 529 -> 2 529 256
+                
+                if self.training or self.eval_size is None:
+                    pos_embed = self.build_2d_sincos_position_embedding(
+                        w, h, self.hidden_dim, self.pe_temperature)
+                else:
+                    pos_embed = getattr(self, f'pos_embed{enc_ind}', None)
+
+                memory = self.encoder[i](src_flatten, pos_embed=pos_embed)  # 2 529 256
+                proj_feats[enc_ind] = memory.transpose([0, 2, 1]).reshape(
+                    [-1, self.hidden_dim, h, w])    # 2 529 256 -> 2 256 529 -> 2 256 23 23 f5
+
+        # CCFM s3 s4 f5(s5经过AIFI) 进行FPN + PAN
         # top-down fpn
         inner_outs = [proj_feats[-1]]
         for idx in range(len(self.in_channels) - 1, 0, -1):

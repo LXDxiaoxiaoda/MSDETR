@@ -198,7 +198,7 @@ class TransformerDecoderLayer(nn.Layer):
         # cross attention
         tgt2 = self.cross_attn(gt_meta,
             self.with_pos_embed(tgt, query_pos_embed), reference_points, memory,
-            memory_spatial_shapes, memory_level_start_index, memory_mask,topk_ind_mask,topk_score)
+            memory_spatial_shapes, memory_level_start_index, memory_mask,topk_ind_mask,topk_score)  # 这里计算cross attention 不同于原版
         tgt = tgt + self.dropout2(tgt2)
         tgt = self.norm2(tgt)
 
@@ -322,7 +322,7 @@ class DAMS_DETR_Transformer(nn.Layer):
             hidden_dim, nhead, dim_feedforward, dropout, activation, num_visir_levels,
             num_decoder_points)
         self.decoder = TransformerDecoder(hidden_dim, decoder_layer,
-                                          num_decoder_layers, eval_idx)
+                                          num_decoder_layers, eval_idx) # decoder_layer -> TransformerDecoderLayer -> corss attention 用到了top-k
         # denoising part
         self.denoising_class_embed = nn.Embedding(
             num_classes,
@@ -476,7 +476,7 @@ class DAMS_DETR_Transformer(nn.Layer):
         return (feat_flatten, spatial_shapes, level_start_index)
 
 
-    def forward(self, feats, vis_feats, ir_feats, pad_mask=None, gt_meta=None,topk_ind_mask=None,topk_score = None):
+    def forward(self, feats, vis_feats, ir_feats, pad_mask=None, gt_meta=None,topk_ind_mask=None,topk_score = None):    # topk_ind_mask topk_score 参数并没有传入，所以是该函数处得到这两个值的
         # input projection and embedding
         visir_feats = vis_feats + ir_feats
 
@@ -492,16 +492,16 @@ class DAMS_DETR_Transformer(nn.Layer):
                                             self.denoising_class_embed.weight,
                                             self.num_denoising,
                                             self.label_noise_ratio,
-                                            self.box_noise_scale)
+                                            self.box_noise_scale)   
         else:
             denoising_class, denoising_bbox_unact, attn_mask, dn_meta = None, None, None, None
         target, init_ref_points_unact, enc_topk_bboxes, enc_topk_logits, topk_ind_mask, topk_score = \
             self._get_decoder_input(gt_meta,
                                     visir_memory, visir_spatial_shapes, visir_level_start_index, denoising_class,
-                                    denoising_bbox_unact)
+                                    denoising_bbox_unact)   # 论文中 competitive query selection ，因为top-k在这里得到
 
         # decoder
-        out_bboxes, out_logits = self.decoder(
+        out_bboxes, out_logits = self.decoder(  # 论文中的 multispectral-decoder 
             gt_meta,
             target,
             init_ref_points_unact,
@@ -561,21 +561,23 @@ class DAMS_DETR_Transformer(nn.Layer):
         topk_ind_mask = None
         topk_score = None
         # prepare input for decoder
-        if self.training or self.eval_size is None:
-            anchors, valid_mask = self._generate_anchors(spatial_shapes)
+        if self.training or self.eval_size is None:     # 是否训练或评估尺寸为空
+            anchors, valid_mask = self._generate_anchors(spatial_shapes)    # 生成锚点和有效掩码
         else:
-            anchors, valid_mask = self.anchors, self.valid_mask
-        memory = paddle.where(valid_mask, memory, paddle.to_tensor(0.))
+            anchors, valid_mask = self.anchors, self.valid_mask # 使用预存锚点和掩码
+        # 过滤内存并获取输出
+        memory = paddle.where(valid_mask, memory, paddle.to_tensor(0.)) 
         output_memory = self.enc_output(memory)
 
-        enc_outputs_class = self.enc_score_head(output_memory)
+        # 获取分类和坐标预测
+        enc_outputs_class = self.enc_score_head(output_memory)  # enc: encoder
         enc_outputs_coord_unact = self.enc_bbox_head(output_memory) + anchors
 
         topk_score, topk_ind = paddle.topk(
-            enc_outputs_class.max(-1), self.num_queries, axis=1)
+            enc_outputs_class.max(-1), self.num_queries, axis=1)    # 选择top-k分数高的区域提议框
 
         ## record topk_fb
-        topk_ind_mask = paddle.to_tensor(np.zeros((bs,300)))
+        topk_ind_mask = paddle.to_tensor(np.zeros((bs,300)))    # 记录topk_ind_mask
         topk_ind_mask.stop_gradient = True
 
         # extract region proposal boxes

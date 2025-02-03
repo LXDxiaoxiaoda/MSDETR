@@ -594,7 +594,7 @@ class ResNet(nn.Layer):
 
 @register
 @serializable
-class ResNet_2(nn.Layer):
+class ResNet_2(nn.Layer):   # 这个resnet_2是用作异构backbone时，实质上是resnet50
     __shared__ = ['norm_type']
 
     def __init__(self,

@@ -3,18 +3,24 @@ num_classes: 1
 
 TrainDataset:
   name: Mutisprctral_COCODataSet
-  vis_image_dir: train_imgs/vis_imgs
-  ir_image_dir : train_imgs/ir_imgs
+  # vis_image_dir: train_imgs/vis_imgs
+  # ir_image_dir : train_imgs/ir_imgs  
+  vis_image_dir: visible/train
+  ir_image_dir : infrared/train
   anno_path: annotations/train.json
-  dataset_dir: dataset/coco_LLVIP
+  # dataset_dir: dataset/coco_LLVIP
+  dataset_dir: /project/datasets/LLVIP
   data_fields: ['image', 'gt_bbox', 'gt_class', 'is_crowd']
 
 EvalDataset:
   name: Mutisprctral_COCODataSet
-  vis_image_dir: val_imgs/vis_imgs
-  ir_image_dir: val_imgs/ir_imgs
+  # vis_image_dir: val_imgs/vis_imgs
+  # ir_image_dir: val_imgs/ir_imgs
+  vis_image_dir: visible/test
+  ir_image_dir: infrared/test
   anno_path: annotations/val.json
-  dataset_dir: dataset/coco_LLVIP
+  # dataset_dir: dataset/coco_LLVIP
+  dataset_dir: /project/datasets/LLVIP
   allow_empty: true
 
 TestDataset:

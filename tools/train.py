@@ -67,12 +67,12 @@ def parse_args():
         default=False,
         help="Enable auto mixed precision training.")
     parser.add_argument(
-        "--fleet", action='store_true', default=False, help="Use fleet or not")
+        "--fleet", action='store_true', default=False, help="Use fleet or not")    # 应该是分布式训练
     parser.add_argument(
         "--use_vdl",
-        type=bool,
+        action='store_true',  # default type=bool   改一下参数设置方式
         default=False,
-        help="whether to record the data to VisualDL.")
+        help="whether to record the data to VisualDL.")     # VisualDL, 类似tensorboard的可视化工具
     parser.add_argument(
         '--vdl_log_dir',
         type=str,
@@ -110,6 +110,8 @@ def parse_args():
         action='store_true',
         default=False,
         help="Enable dy2st to train.")
+    ######################################
+    # parser.add_argument('--device', default='gpu:0', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')  
 
     args = parser.parse_args()
     return args
@@ -127,16 +129,16 @@ def run(FLAGS, cfg):
         set_random_seed(0)
 
     # build trainer
-    trainer = Trainer(cfg, mode='train')
+    trainer = Trainer(cfg, mode='train')    # 构建训练器
 
     # load weights
-    if FLAGS.resume is not None:
+    if FLAGS.resume is not None:    # 断点续训
         trainer.resume_weights(FLAGS.resume)
-    elif 'pretrain_weights' in cfg and cfg.pretrain_weights:
+    elif 'pretrain_weights' in cfg and cfg.pretrain_weights:    # 加载预训练模型
         trainer.load_weights(cfg.pretrain_weights)
 
     # training
-    trainer.train(FLAGS.eval)
+    trainer.train(FLAGS.eval)   # 训练代码
 
 
 def main():
@@ -161,7 +163,9 @@ def main():
         cfg.use_mlu = False
 
     if cfg.use_gpu:
-        place = paddle.set_device('gpu:0')
+        place = paddle.set_device('gpu')
+    # if cfg.use_gpu:
+    #     place = paddle.set_device(FLAGS.device)
     elif cfg.use_npu:
         place = paddle.set_device('npu')
     elif cfg.use_xpu:
@@ -172,7 +176,7 @@ def main():
         place = paddle.set_device('cpu')
 
     if FLAGS.slim_config:
-        cfg = build_slim_model(cfg, FLAGS.slim_config)
+        cfg = build_slim_model(cfg, FLAGS.slim_config)  # 轻量化模型
 
     # FIXME: Temporarily solve the priority problem of FLAGS.opt
     merge_config(FLAGS.opt)

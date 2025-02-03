@@ -509,3 +509,28 @@ def varifocal_loss_with_logits(pred_logits,
     loss = F.binary_cross_entropy_with_logits(
         pred_logits, gt_score, weight=weight, reduction='none')
     return loss.mean(1).sum() / normalizer
+
+from ..initializer import linear_init_
+
+class MLP(nn.Layer):
+    """This code is based on
+        https://github.com/facebookresearch/detr/blob/main/models/detr.py
+    """
+
+    def __init__(self, input_dim, hidden_dim, output_dim, num_layers):
+        super().__init__()
+        self.num_layers = num_layers
+        h = [hidden_dim] * (num_layers - 1)
+        self.layers = nn.LayerList(
+            nn.Linear(n, k) for n, k in zip([input_dim] + h, h + [output_dim]))
+
+        self._reset_parameters()
+
+    def _reset_parameters(self):
+        for l in self.layers:
+            linear_init_(l)
+
+    def forward(self, x):
+        for i, layer in enumerate(self.layers):
+            x = F.relu(layer(x)) if i < self.num_layers - 1 else layer(x)
+        return x

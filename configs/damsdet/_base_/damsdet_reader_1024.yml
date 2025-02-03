@@ -12,7 +12,7 @@ TrainReader:
     - Multi_NormalizeBox: {}
     - BboxXYXY2XYWH: {}
     - Multi_Permute: {}
-  batch_size: 2
+  batch_size: 1   # default 2
   shuffle: true
   drop_last: true
   collate_batch: false
@@ -25,7 +25,7 @@ EvalReader:
     - Multi_Resize: {target_size: [1024, 1024], keep_ratio: False, interp: 2}
     - Multi_NormalizeImage: {mean: [0., 0., 0.], std: [1., 1., 1.], norm_type: none}
     - Multi_Permute: {}
-  batch_size: 2
+  batch_size: 1   # default 2
   shuffle: false
   drop_last: false
 

@@ -3,18 +3,24 @@ num_classes: 6
 
 TrainDataset:
   name: Mutisprctral_COCODataSet
-  vis_image_dir: train_vis_img
-  ir_image_dir : train_ir_img
+  # vis_image_dir: train_vis_img
+  # ir_image_dir : train_ir_img
+  vis_image_dir: visible/all
+  ir_image_dir : infrared/all
   anno_path: annotations/m3fd_train_new.json
-  dataset_dir: dataset/coco_m3fd
+  # dataset_dir: dataset/coco_m3fd
+  dataset_dir: /project/datasets/M3FD
   data_fields: ['image', 'gt_bbox', 'gt_class', 'is_crowd']
 
 EvalDataset:
   name: Mutisprctral_COCODataSet
-  vis_image_dir: val_vis_img
-  ir_image_dir: val_ir_img
+  # vis_image_dir: val_imgs/vis_imgs
+  # ir_image_dir: val_imgs/ir_imgs
+  vis_image_dir: visible/all
+  ir_image_dir: infrared/all
   anno_path: annotations/m3fd_val_new.json
-  dataset_dir: dataset/coco_m3fd
+  # dataset_dir: dataset/coco_m3fd
+  dataset_dir: /project/datasets/M3FD
   allow_empty: trues
 
 TestDataset:
